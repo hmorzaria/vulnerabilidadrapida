@@ -1,0 +1,51 @@
+---
+title: "Análisis para la determinación de vulnerabilidad de las comunidades pesqueras y acuícolas."
+output: html_notebook
+---
+
+Este producto es considerado esencial para dirigir esfuerzos de adaptación al cambio climático. El marco de evaluación de la vulnerabilidad de pesquerías arrecifales publicado por FAO (Cinner et al. http://www.fao.org/3/a-ap972e.pdf) sugiere que para denotar cuáles comunidades se encuentran en mayor riesgo por efectos del cambio climático, se deben balancear de manera aditiva tres variables: exposición (daños potenciales a futuro), susceptibilidad (situación actual que pone en riesgo a las personas) y capacidad adaptativa (potencial para resolver los problemas ocasionados por las modificaciones climáticas). En este caso se llevará a cabo una evaluación rápida de la vulnerabilidad a comunidades costeras de México (definidas como aquellas alejadas un máximo de 30 km de la línea de costa, y con más de 100 habitantes), a partir de información generada durante el estudio y datos de INEGI y del Directorio Nacional de Actividades Económicas. Los indicadores de exposición serán los cambios esperados en temperatura y productividad primaria frente a cada comunidad, mientras que los de susceptibilidad serán tres: población ocupada (indicador del estado económico de las personas), población empleada en actividades primarias (donde se incluye la pesca) y, número de casas habitación con servicios (agua, electricidad, drenaje). Finalmente, la capacidad de adaptación por localidad se estimará con base en el grado promedio de escolaridad de la población, el porcentaje con servicios de salud pública, y población menor a 15 años (que representa la fuerza de trabajo a futuro mediato).
+
+
+```{r}
+source("libraries.R")
+```
+
+
+Leer archivos originales
+```{r}
+
+output.data <- st_read('~/vulnerabilidadrapida/datos_originales/Export_Output.shp')
+
+```
+
+Leer archivos INEGI 2020
+```{r}
+
+#datos pueden ser obtenidos de https://www.inegi.org.mx/contenidos/programas/ccpv/2020/datosabiertos/iter/iter_00_cpv2020_csv.zip
+
+#https://epsg.io/4485
+crs.proj <- ("+proj=utm +zone=12 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs") 
+
+est.2019 <- st_read("~/vulnerabilidadrapida/datos_INEGI_2020/dest2019gw.shp")
+est.2019.proj <- st_transform(est.2019, crs.proj)
+
+
+combine.2019 <- st_combine(est.2019.proj)
+
+pais.2019 <- st_union(combine.2019, by_feature = TRUE)
+
+buffer.2019 <- st_buffer(pais.2019, dist=-30, singleSide = TRUE)
+
+
+#Localidades de la Republica Mexicana http://www.conabio.gob.mx/informacion/gis/
+
+loc.2019 <- st_read("~/vulnerabilidadrapida/datos_INEGI_2020/locmge19gw.shp")
+loc.2019.proj <- st_transform(loc.2019, crs.proj)
+
+coste.comm <- st_difference(loc.2019.proj,buffer.2019)
+
+
+inegi.2020 <- read_csv("~/vulnerabilidadrapida/datos_INEGI_2020/conjunto_de_datos/conjunto_de_datos_iter_00_cpv2020.csv")
+
+```
+
