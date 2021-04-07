@@ -3,49 +3,398 @@ title: "Análisis para la determinación de vulnerabilidad de las comunidades pe
 output: html_notebook
 ---
 
-Este producto es considerado esencial para dirigir esfuerzos de adaptación al cambio climático. El marco de evaluación de la vulnerabilidad de pesquerías arrecifales publicado por FAO (Cinner et al. http://www.fao.org/3/a-ap972e.pdf) sugiere que para denotar cuáles comunidades se encuentran en mayor riesgo por efectos del cambio climático, se deben balancear de manera aditiva tres variables: exposición (daños potenciales a futuro), susceptibilidad (situación actual que pone en riesgo a las personas) y capacidad adaptativa (potencial para resolver los problemas ocasionados por las modificaciones climáticas). En este caso se llevará a cabo una evaluación rápida de la vulnerabilidad a comunidades costeras de México (definidas como aquellas alejadas un máximo de 30 km de la línea de costa, y con más de 100 habitantes), a partir de información generada durante el estudio y datos de INEGI y del Directorio Nacional de Actividades Económicas. Los indicadores de exposición serán los cambios esperados en temperatura y productividad primaria frente a cada comunidad, mientras que los de susceptibilidad serán tres: población ocupada (indicador del estado económico de las personas), población empleada en actividades primarias (donde se incluye la pesca) y, número de casas habitación con servicios (agua, electricidad, drenaje). Finalmente, la capacidad de adaptación por localidad se estimará con base en el grado promedio de escolaridad de la población, el porcentaje con servicios de salud pública, y población menor a 15 años (que representa la fuerza de trabajo a futuro mediato).
+Este producto es considerado esencial para dirigir esfuerzos de adaptación al cambio climático. El marco de evaluación de la vulnerabilidad de pesquerías arrecifales publicado por FAO (Cinner et al. http://www.fao.org/3/a-ap972e.pdf) sugiere que para denotar cuáles comunidades se encuentran en mayor riesgo por efectos del cambio climático, se deben balancear de manera additiva tres variables: exposición (daños potenciales a futuro), susceptibilidad (situación actual que pone en riesgo a las personas) y capacidad adaptativa (potencial para resolver los problemas ocasionados por las modificaciones climáticas). En este caso se llevará a cabo una evaluación rápida de la vulnerabilidad a comunidades costeras de México (definidas como aquellas alejadas un máximo de 30 km de la línea de costa, y con más de 100 habitantes), a partir de información generada durante el estudio y datos de INEGI y del Directorio Nacional de Actividades Económicas. Los indicadores de exposición serán los cambios esperados en temperatura y productividad primaria frente a cada comunidad, mientras que los de susceptibilidad serán tres: población ocupada (indicador del estado económico de las personas), población empleada en actividades primarias (donde se incluye la pesca) y, número de casas habitación con servicios (agua, electricidad, drenaje). Finalmente, la capacidad de adaptación por localidad se estimará con base en el grado promedio de escolaridad de la población, el porcentaje con servicios de salud pública, y población menor a 15 años (que representa la fuerza de trabajo a futuro mediato).
 
 
-```{r}
+```{r libraries, include=FALSE}
 source("libraries.R")
+source("pca_factor.R")
+source("datos_denue.R")
+source("grafico_datos.R")
+source("expo_analisis.R")
+source("vul_analisis.R")
 ```
 
 
-Leer archivos originales
 ```{r}
-
-output.data <- st_read('~/vulnerabilidadrapida/datos_originales/Export_Output.shp')
-
-```
-
-Leer archivos INEGI 2020
-```{r}
-
 #datos pueden ser obtenidos de https://www.inegi.org.mx/contenidos/programas/ccpv/2020/datosabiertos/iter/iter_00_cpv2020_csv.zip
 
 #https://epsg.io/4485
-crs.proj <- ("+proj=utm +zone=12 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs") 
+crs.proj.utm <- ("+proj=utm +zone=12 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs") 
+crs.proj.wgs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 
+#oceanos
+atlantic.shp <- st_read("~/vulnerabilidadrapida/atlantic_ocean.shp")
+atlantic.shp.proj <- st_transform(atlantic.shp, crs.proj.utm)
+
+pacific.shp <- st_read("~/vulnerabilidadrapida/pacific_ocean.shp")
+pacific.shp.proj <- st_transform(pacific.shp, crs.proj.utm)
+
+#estados de la Republica
 est.2019 <- st_read("~/vulnerabilidadrapida/datos_INEGI_2020/dest2019gw.shp")
-est.2019.proj <- st_transform(est.2019, crs.proj)
 
+estados.mx <- cbind(est.2019, st_coordinates(st_centroid(est.2019)))
 
-combine.2019 <- st_combine(est.2019.proj)
-
-pais.2019 <- st_union(combine.2019, by_feature = TRUE)
-
-buffer.2019 <- st_buffer(pais.2019, dist=-30, singleSide = TRUE)
-
-
-#Localidades de la Republica Mexicana http://www.conabio.gob.mx/informacion/gis/
-
-loc.2019 <- st_read("~/vulnerabilidadrapida/datos_INEGI_2020/locmge19gw.shp")
-loc.2019.proj <- st_transform(loc.2019, crs.proj)
-
-coste.comm <- st_difference(loc.2019.proj,buffer.2019)
-
-
+#Datos censo 2020
 inegi.2020 <- read_csv("~/vulnerabilidadrapida/datos_INEGI_2020/conjunto_de_datos/conjunto_de_datos_iter_00_cpv2020.csv")
+
+#Decimal Degrees = degrees + (minutes/60) + (seconds/3600)
+
+#calcular grados decimales en base a coordenadas grados minutos segundos
+inegi.2020.id <- inegi.2020 %>% 
+  filter(!is.na(LONGITUD)) %>% 
+  mutate(COM_ID = paste0(ENTIDAD,"_",MUN, "_",LOC)) %>% 
+  dplyr::select(COM_ID, everything()) %>% 
+  separate(LONGITUD,c("lon_deg","lon"),"°") %>% 
+  separate(lon,c("lon_min","lon_sec"),"'") %>% 
+  mutate(lon_sec = gsub("\".*\ W","",lon_sec)) %>% 
+  separate(LATITUD,c("lat_deg","lat"),"°") %>% 
+  separate(lat,c("lat_min","lat_sec"),"'") %>% 
+  mutate(lat_sec = gsub("\".*\ N","",lat_sec)) %>% 
+  mutate(across(lon_deg:lat_sec,as.numeric)) %>% 
+  mutate(dec_lon= (lon_deg + (lon_min / 60) + (lon_sec / 3600))*-1, 
+         dec_lat=(lat_deg + (lat_min / 60) + (lat_sec / 3600)))
+
+#convertir en capa geografica
+inegi.2020.coords <- inegi.2020.id
+
+coordinates(inegi.2020.coords) <- c("dec_lon","dec_lat")
+
+#definir proyeccion geografica y proyectar a utm
+proj4string(inegi.2020.coords) <- crs.proj.wgs
+inegi.2020.coords.sf <- st_as_sf(inegi.2020.coords)
+inegi.2020.coords.proj <- st_transform(inegi.2020.coords.sf, crs.proj.utm)
+
+#delimitar datos censales a estados costeros
+inegi.edo.coste <- inegi.2020.coords.proj %>% 
+   filter(!is.na(POBFEM)) %>% 
+  filter(POBFEM!="*") %>% 
+  dplyr::select(-PCDISC_MOT2) %>% 
+  filter(NOM_ENT %in% c("Baja California Sur", "Baja California", "Sonora", "Sinaloa", "Nayarit", "Jalisco", "Colima", "Michoacán de Ocampo", "Guerrero", "Oaxaca", "Chiapas", "Quintana Roo", "Yucatán", "Campeche", "Tabasco", "Veracruz de Ignacio de la Llave", "Tamaulipas")) %>% 
+  mutate(id_row = 1:nrow(.))
+
+#seleccionar comunidades costeras a 30 km de la costa del Pacifico
+distance.pacific <- st_distance(inegi.edo.coste, st_cast(pacific.shp.proj,"POLYGON")) %>% 
+  as_tibble() %>% 
+  mutate(id_row = 1:nrow(.)) 
+
+rows.coast.pacific <- distance.pacific %>% 
+  mutate(dist = as.numeric(value)) %>% 
+  filter(dist<30000) %>% 
+  pull(id_row)
+
+inegi.coste.pacific <- inegi.edo.coste %>% 
+  filter(id_row %in% rows.coast.pacific)
+
+#seleccionar comunidades costeras a 30 km de la costa del Atlantico
+#https://gis.stackexchange.com/questions/343222/remove-points-that-are-close-to-a-border-when-building-a-grid
+
+distance.atlantic <- st_distance(inegi.edo.coste, st_cast(atlantic.shp.proj,"POLYGON")) %>% 
+  as_tibble() %>% 
+  mutate(id_row = 1:nrow(.)) 
+
+rows.coast.atlantic <- distance.atlantic %>% 
+  mutate_all(as.numeric) %>% 
+  mutate(min_dist = pmin(V1,V2,V3,V4,V5,V6)) %>% 
+  filter(min_dist<30000) %>% 
+  pull(id_row)
+
+inegi.coste.atlantic <- inegi.edo.coste %>% 
+  filter(id_row %in% rows.coast.atlantic)
+
+
+#unir comunidades atlantico y pacifico en una sola capa
+#inegi.comm.coste <- st_combine(inegi.coste.pacific, inegi.coste.atlantic)
+
+
+data.comm.pacific <- inegi.coste.pacific %>% 
+  st_drop_geometry() %>% 
+  as_tibble() 
+
+data.comm.atlantic <- inegi.coste.atlantic %>% 
+  st_drop_geometry() %>% 
+  as_tibble() 
+
+data.comm.costas <- data.comm.atlantic %>% 
+  bind_rows(data.comm.pacific) %>% 
+  mutate(dec_lon= (lon_deg + (lon_min / 60) + (lon_sec / 3600))*-1, 
+         dec_lat=(lat_deg + (lat_min / 60) + (lat_sec / 3600)))
+
+write_csv(data.comm.costas,"comunidades_costeras_INEGI.csv")
+
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+class(world)
+
+#simbolos http://www.sthda.com/english/wiki/r-plot-pch-symbols-the-different-point-shapes-available-in-r
+
+mapa.locs <- ggplot(data = world) +
+    geom_sf() +
+    geom_sf(data = est.2019, fill= NA) + 
+    geom_sf(data = inegi.coste.atlantic, size = 0.5, shape = 16, fill = "darkred") +
+    geom_sf(data = inegi.coste.pacific, size = 0.5, shape = 16, fill = "darkred") +
+    coord_sf(xlim = c(-119, -85), ylim = c(12, 35), expand = FALSE) +
+   xlab("Longitud") + ylab("Latitud") +
+  theme(panel.grid.major = element_line(color = gray(0.4), linetype = "dashed", 
+        size = 0.1), panel.background = element_rect(fill = "aliceblue"))
+
+
+ggsave("mapa_localidades.costeras.png", mapa.locs,device="png", dpi=300, width = 6, height = 4)
+
+
+```
+
+
+
+Susceptibilidad: población ocupada (indicador del estado económico de las personas), población empleada en actividades primarias (donde se incluye la pesca) y, número de casas habitación con servicios (agua, electricidad, drenaje). 
+
+```{r}
+
+#Susceptibilidad
+#POCUPADA: Población de 12 años y más ocupada
+#población empleada en actividades primarias (donde se incluye la pesca)
+#VPH_C_SERV: Viviendas particulares habitadas que disponen de energía eléctrica, agua entubada de la red pública y drenaje
+#TOTHOG 164,Total de hogares censales,Hogares en viviendas particulares habitadas. Se considera un hogar en cada vivienda particular. Incluye casa única en el terreno; departamento en edificio; vivienda en vecindad; vivienda en cuarto de azotea; local no construido para habitación; vivienda móvil; refugio o clase no especificada. 
+#POBTOT Población total,"Total de personas que residen habitualmente en el país, la entidad federativa, el municipio o la demarcación territorial y la localidad. Incluye la estimación del número de personas en viviendas particulares sin información de ocupantes. Incluye a la población que no especificó su edad.",POBTOT,0...999999999,9
+
+crs.proj.utm <- "+proj=utm +zone=12 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+crs.proj.wgs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+#estados de la Republica
+est.2019 <- st_read(here("datos_INEGI_2020","dest2019gw.shp"))
+
+inegi.2010 <- fread(here("datos_INEGI_2010","iter_00_cpv2010", "conjunto_de_datos","iter_00_cpv2010.csv"), encoding="Latin-1")
+
+inegi.denue <- fread(here("INEGI_DENUE_05022021.csv"), encoding="Latin-1") %>% 
+  mutate(COM_ID= paste(`Clave entidad`,`Clave municipio`,`Clave localidad`, sep="_")) %>% 
+  mutate(index_no=1) %>%
+  group_by(COM_ID) %>% 
+  summarise(neg_pesca = sum(index_no))
+
+paginas.archivo <- excel_sheets(here("DENUE_LocalidadesINEGI04032021.xlsx"))
+
+no.paginas <- 1:length(paginas.archivo)
+
+unidades.denue <- lapply(paginas.archivo, datos_denue, unidades.ec = "DENUE_LocalidadesINEGI04032021.xlsx") 
+
+unidades.rel <- unidades.denue %>%  
+  bind_rows %>% 
+  mutate(COM_ID = paste(cve_ent,cve_mun,cve_loc, sep="_")) %>% 
+  left_join(inegi.denue, by="COM_ID") %>% 
+  mutate(neg_pesca = if_else(is.na(neg_pesca),0,neg_pesca)) %>% 
+  mutate(unidad_pesca = neg_pesca / unidades_economicas) %>% 
+  dplyr::select(COM_ID, unidad_pesca)
+
+cost.data.pob <- read_csv(here("comunidades_costeras_INEGI.csv")) 
+  
+susc.datos <- cost.data.pob %>% 
+  left_join(unidades.rel, by="COM_ID") %>% 
+  dplyr::select(COM_ID, NOM_LOC, POBTOT, POCUPADA, TOTHOG, VPH_C_SERV, unidad_pesca) %>% 
+  mutate(across(POCUPADA:VPH_C_SERV, as.numeric)) %>% 
+  mutate(POCUPADA = if_else(is.na(POCUPADA),0,POCUPADA)) %>% 
+  mutate(TOTHOG = if_else(is.na(TOTHOG),0,TOTHOG)) %>% 
+  mutate(VPH_C_SERV = if_else(is.na(VPH_C_SERV),0,VPH_C_SERV)) %>% 
+  mutate(unidad_pesca = if_else(is.na(unidad_pesca),0,unidad_pesca)) %>% 
+  mutate(prop_ocupada = 1-(POCUPADA/POBTOT), prop_hogares = 1-(VPH_C_SERV/TOTHOG)) %>%   mutate(prop_ocupada = if_else(is.nan(prop_ocupada),0,prop_ocupada)) %>% 
+  mutate(prop_hogares = if_else(is.nan(prop_hogares),0,prop_hogares)) %>% 
+  dplyr::select(-POBTOT, -POCUPADA, -TOTHOG, -VPH_C_SERV)
+ 
+
+#PCA sobre datos susceptibilidad
+
+pca_factor(susc.datos, datasetname = "Susceptibilidad")
+
+susc.pca <- read_csv(here("factor_scores_Susceptibilidad.csv"))
+
+tabla.edos <- read_csv(here("estados_region.csv"))
+#estados de la Republica
+est.2019 <- st_read("~/vulnerabilidadrapida/datos_INEGI_2020/dest2019gw.shp")
+
+grafico_datos(cost.data.pob, datos.pca=susc.pca, datos.indice=susc.datos, tabla.edos, nom.indice = "Susceptibilidad", num.corte = 0.8, nom.abr = "susc" )
+
+
+
+
+```
+
+
+Capacidad de adaptación: Grado promedio de escolaridad de la población, porcentaje con servicios de salud pública, y población menor a 15 años (que representa la fuerza de trabajo a futuro mediato).
+
+
+```{r}
+
+#ADAPTACION
+#GRAPROES: Promedio de escolaridad
+#PDER_SS: Población afiliada a servicios de salud,"Total de personas que tienen derecho a recibir servicios médicos en alguna institución de salud pública o privada
+#POBTOT: Población total,"Total de personas que residen habitualmente en el país, la entidad federativa, el municipio o la demarcación territorial y la localidad. Incluye la estimación del número de personas en viviendas particulares sin información de ocupantes. Incluye a la población que no especificó su edad."
+#P_0A2, Población de 0 a 2 años,Personas de 0 a 2 años de edad.
+#P_3A5, Población de 3 a 5 años,Personas de 3 a 5 años de edad.
+#P_6A11, Población de 6 a 11 años,Personas de 6 a 11 años de edad.
+#P_12A14, Población de 12 a 14 años,Personas de 12 a 14 años de edad.
+
+crs.proj.utm <- ("+proj=utm +zone=12 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs") 
+crs.proj.wgs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+#estados de la Republica
+est.2019 <- st_read("~/vulnerabilidadrapida/datos_INEGI_2020/dest2019gw.shp")
+
+cost.data.pob <- read_csv("comunidades_costeras_INEGI.csv")
+
+
+adap.datos <- cost.data.pob %>% 
+  dplyr::select(COM_ID, NOM_LOC, GRAPROES,PDER_SS,POBTOT,P_0A2,P_3A5, P_6A11,P_12A14) %>% 
+  mutate(across(GRAPROES:P_12A14, as.numeric)) %>% 
+  mutate(GRAPROES = if_else(is.na(GRAPROES),0,GRAPROES)) %>%
+  mutate(P_0A14 = (P_0A2+P_3A5+P_6A11+P_12A14)) %>% 
+  mutate(P_0A14 = if_else(is.na(P_0A14),0,P_0A14)) %>% 
+  mutate(por_menor = P_0A14/POBTOT) %>% 
+  mutate(por_salud = (PDER_SS/POBTOT)) %>% 
+  mutate(por_salud = if_else(is.na(por_salud),0,por_salud)) %>% 
+  dplyr::select(COM_ID, NOM_LOC, GRAPROES,por_menor,por_salud)
+  
+
+#PCA 
+
+pca_factor(adap.datos, datasetname = "Adaptacion")
+
+adap.pca <- read_csv("factor_scores_Adaptacion.csv")
+ 
+tabla.edos <- read_csv(here("estados_region.csv"))
+
+#estados de la Republica
+est.2019 <- st_read("~/vulnerabilidadrapida/datos_INEGI_2020/dest2019gw.shp")
+
+grafico_datos(cost.data.pob, datos.pca=adap.pca, datos.indice=adap.datos, tabla.edos, nom.indice = "Capacidad de adaptación", num.corte = 0.25, nom.abr = "adap")
+
+
+```
+
+Extraer temperatura buffer de 50 km alrededor de cada comunidad
+
+```{r}
+
+#https://epsg.io/4485
+
+
+cost.data.pob <- read_csv("comunidades_costeras_INEGI.csv")
+
+est.2019 <- readOGR(dsn="~/vulnerabilidadrapida/datos_INEGI_2020/",layer="dest2019gw")
+
+crs.proj.utm <- "+proj=utm +zone=12 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs" 
+crs.proj.wgs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+coste.coords <- cost.data.pob %>% 
+  dplyr::select(COM_ID, dec_lon, dec_lat) 
+
+coordinates(coste.coords) <- c("dec_lon","dec_lat")
+
+#definir proyeccion geografica y proyectar a utm
+proj4string(coste.coords) <- crs.proj.wgs
+coste.coords.sf <- st_as_sf(coste.coords)
+coste.coords.proj <- st_transform(coste.coords.sf, crs.proj.utm) 
+
+
+coste.coords <- coste.coords@coords %>% 
+  as.data.frame()
+
+coste.comm.buff <- geobuffer_pts(xy = coste.coords, dist_m = 50*10^3) # 50 km
+
+coste.buff.sf <- st_as_sf(coste.comm.buff)
+
+tabla.edos <- read_csv(here("estados_region.csv"))
+
+raster_scale <- function(s){
+
+  mnv <- cellStats(s,'min')
+mxv <- cellStats(s,'max')
+x <- (s - mnv) / (mxv - mnv)
+  
+}
+
+#rasters observados
+
+sst.raster.pac <- raster("./rasters_obs/sst_mean_pacific.asc")
+sst.raster.atl <- raster("./rasters_obs/sst_mean_atlantic.asc")
+
+sst.raster.data <- merge(sst.raster.pac, sst.raster.atl)
+
+
+prod.raster.pac <- raster("./rasters_obs/pp_mean_pacific.asc")
+prod.raster.atl <- raster("./rasters_obs/pp_mean_atlantic.asc")
+
+prod.raster.data <- merge(prod.raster.pac, prod.raster.atl)
+
+#normalizar 0-1
+#alta temperatura y baja productividad son alta exposicion
+
+sst.raster.norm <- raster_scale(sst.raster.data)
+prod.raster.norm <- 1- (raster_scale(prod.raster.data))
+
+
+expo_analisis(sst.raster.norm, prod.raster.norm, coste.buff.sf, cost.data.pob, tabla.edos, nom.indice = "Exposición actual", nom.corte = 0.8, nom.abr = "expo_actual")
+#read observed SST Pacific
+
+#SSP 585 - 2050
+sst.raster.data <- raster("~/vulnerabilidadrapida/rasters_proj/anom_SSP585_SST_2050MX.tif")  
+prod.raster.data <- raster("~/vulnerabilidadrapida/rasters_proj/porcentaje_ssp585_2050_intpp.tif")  
+
+sst.raster.norm <- raster_scale(sst.raster.data)
+prod.raster.norm <- 1- (raster_scale(prod.raster.data))
+
+expo_analisis(sst.raster.norm, prod.raster.norm, coste.buff.sf, cost.data.pob, tabla.edos, nom.indice = "Exposición SSP585 2050", nom.corte = 0.8, nom.abr = "expo_ssp585_50")
+#read observed SST Pacific
+
+
+#SSP 585 - 2100
+sst.raster.data <- raster("~/vulnerabilidadrapida/rasters_proj/anom_SSP585_SST_2100.tif")  
+prod.raster.data <- raster("~/vulnerabilidadrapida/rasters_proj/porcentaje_ssp585_intpp_2100.tif")  
+
+sst.raster.norm <- raster_scale(sst.raster.data)
+prod.raster.norm <- 1- (raster_scale(prod.raster.data))
+
+expo_analisis(sst.raster.norm, prod.raster.norm, coste.buff.sf, cost.data.pob, tabla.edos, nom.indice = "Exposición SSP585 2100", nom.corte = 0.8, nom.abr = "expo_ssp585_100")
+#read observed SST Pacific
+
+
+#SSP 126 - 2050
+sst.raster.data <- raster("~/vulnerabilidadrapida/rasters_proj/anom_SSP126_SST_2050.tif")  
+prod.raster.data <- raster("~/vulnerabilidadrapida/rasters_proj/porcentaje_ssp126_intpp_2050.tif")  
+
+sst.raster.norm <- raster_scale(sst.raster.data)
+prod.raster.norm <- 1- (raster_scale(prod.raster.data))
+
+expo_analisis(sst.raster.norm, prod.raster.norm, coste.buff.sf, cost.data.pob, tabla.edos, nom.indice = "Exposición SSP126 2050", nom.corte = 0.8, nom.abr = "expo_ssp126_50")
+#read observed SST Pacific
+
+#SSP 126 - 2100
+sst.raster.data <- raster("~/vulnerabilidadrapida/rasters_proj/anom_SSP126_SST_2100MX.tif")  
+prod.raster.data <- raster("~/vulnerabilidadrapida/rasters_proj/porcentaje_ssp126_intpp_2100.tif")  
+
+sst.raster.norm <- raster_scale(sst.raster.data)
+prod.raster.norm <- 1- (raster_scale(prod.raster.data))
+
+expo_analisis(sst.raster.norm, prod.raster.norm, coste.buff.sf, cost.data.pob, tabla.edos, nom.indice = "Exposición SSP126 2100", nom.corte = 0.8, nom.abr = "expo_ssp126_100")
+#read observed SST Pacific
+
+```
+
+Vulnerabilidad
+```{r}
+
+tabla.edos <- read_csv(here("estados_region.csv"))
+
+expo.base <- read_csv("expo_actual_datos.csv") %>% 
+  dplyr::rename(exposicion_base=PCA_norm)%>% 
+  dplyr::select(-PC1, -sst, -prod, -LOC)
+
+vul_analisis(expo_dat = "expo_ssp126_50_datos.csv", adap_dat = "adap_datos.csv", susc_dat = "susc_datos.csv", escenario.nom="SSP126 2050")
+
+vul_analisis(expo_dat = "expo_ssp126_100_datos.csv", adap_dat = "adap_datos.csv", susc_dat = "susc_datos.csv", escenario.nom="SSP126 2100")
+
+vul_analisis(expo_dat = "expo_ssp585_50_datos.csv", adap_dat = "adap_datos.csv", susc_dat = "susc_datos.csv", escenario.nom="SSP585 2050")
+
+vul_analisis(expo_dat = "expo_ssp585_100_datos.csv", adap_dat = "adap_datos.csv", susc_dat = "susc_datos.csv", escenario.nom="SSP585 2100")
+
 
 ```
 

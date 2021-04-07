@@ -40,3 +40,12 @@ vignettes/*.pdf
 
 #datafiles
 /datos_INEGI_2020/
+/datos_inegi_2010/
+/rasters_obs/
+/rasters_proj/
+iter_00_cpv2010.csv
+com_costeras.dbf
+com_costeras.prj
+com_costeras.shp
+com_costeras.shx
+DENUE_LocalidadesINEGI04032021.xlsx

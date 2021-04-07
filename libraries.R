@@ -13,13 +13,19 @@
 #install.packages("devtools")
 #library(devtools)
 
-.packages = c("devtools","raster","readxl",
+#devtools::install_github("valentinitnelav/geobuffer")
+
+.packages = c("tidyverse","devtools","raster","readxl",
               "sp","sf",
               "readr","rgdal","XML", 
-              "stringr","data.table","ggmap","Redmonder") 
+              "stringr","data.table","ggmap","Redmonder","psych",
+              "geobuffer","maptools","stringr","Rfast","nFactors","rnaturalearth",
+              "gridExtra","exactextractr","here", "patchwork","paletteer","plotrix") 
 
 # Install CRAN packages (if not already installed)
 .inst <- .packages %in% installed.packages()
+if(length(.packages[!.inst]) > 0) install.packages(.packages[!.inst])
+
 # Load packages into session 
 lapply(.packages, require, character.only=TRUE)
 
